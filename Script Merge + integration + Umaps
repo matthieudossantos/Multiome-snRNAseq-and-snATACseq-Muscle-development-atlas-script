@@ -1,0 +1,405 @@
+library(SoupX)
+library(dplyr)
+library(Seurat)
+library(patchwork)
+library(ggplot2)
+library(cowplot)
+library(Signac)
+library(Seurat)
+library(GenomeInfoDb)
+library(EnsDb.Mmusculus.v79)
+library(ggplot2)
+library(patchwork)
+library(BSgenome.Mmusculus.UCSC.mm10)
+set.seed(1234)
+library(JASPAR2020)
+library(TFBSTools)
+library(GenomicRanges)
+library(future)
+library(sctransform)
+library(motifmatchr)
+
+
+counts <- Read10X_h5("/Users/s204371/Desktop/single nuclei analysis/Cell_ranger_ATAC_GEX/MultiomeE14/outs/filtered_feature_bc_matrix.h5")
+E14 <- CreateSeuratObject(
+  counts = counts$`Gene Expression`,
+  assay = "RNA", project = "E14"
+)
+
+counts <- Read10X_h5("/Users/s204371/Desktop/single nuclei analysis/Cell_ranger_ATAC_GEX/MultiomeE18/outs/filtered_feature_bc_matrix.h5")
+E18 <- CreateSeuratObject(
+  counts = counts$`Gene Expression`,
+  assay = "RNA", project = "E18"
+)
+
+counts <- Read10X_h5("/Users/s204371/Desktop/single nuclei analysis/Cell_ranger_ATAC_GEX/MultiomeP5/outs/filtered_feature_bc_matrix.h5")
+P5 <- CreateSeuratObject(
+  counts = counts$`Gene Expression`,
+  assay = "RNA", project = "P5"
+)
+
+
+counts <- Read10X_h5("/Users/s204371/Desktop/single nuclei analysis/Cell_ranger_ATAC_GEX/MultiomeAdult/outs/filtered_feature_bc_matrix.h5")
+Adult <- CreateSeuratObject(
+  counts = counts$`Gene Expression`,
+  assay = "RNA", project = "Adult"
+)
+
+
+annotation <- GetGRangesFromEnsDb(ensdb = EnsDb.Mmusculus.v79)
+seqlevelsStyle(annotation) <- "UCSC"
+genome(annotation) <- "mm10"
+
+peaks.E14 <- read.table(
+  file = "/Users/s204371/Desktop/single nuclei analysis/Cell_ranger_ATAC_GEX/MultiomeE14/outs/atac_peaks.bed",
+  col.names = c("chr", "start", "end")
+)
+peaks.E18 <- read.table(
+  file = "/Users/s204371/Desktop/single nuclei analysis/Cell_ranger_ATAC_GEX/MultiomeE18/outs/atac_peaks.bed",
+  col.names = c("chr", "start", "end")
+)
+peaks.P5 <- read.table(
+  file = "/Users/s204371/Desktop/single nuclei analysis/Cell_ranger_ATAC_GEX/MultiomeP5/outs/atac_peaks.bed",
+  col.names = c("chr", "start", "end")
+)
+peaks.Adult <- read.table(
+  file = "/Users/s204371/Desktop/single nuclei analysis/Cell_ranger_ATAC_GEX/MultiomeAdult/outs/atac_peaks.bed",
+  col.names = c("chr", "start", "end")
+)
+
+# convert to genomic ranges
+gr.E14 <- makeGRangesFromDataFrame(peaks.E14)
+gr.E18 <- makeGRangesFromDataFrame(peaks.E18)
+gr.P5 <- makeGRangesFromDataFrame(peaks.P5)
+gr.Adult <- makeGRangesFromDataFrame(peaks.Adult)
+
+# Create a unified set of peaks to quantify in each dataset
+combined.peaks <- reduce(x = c(gr.E14, gr.E18, gr.P5, gr.Adult))
+
+# Filter out bad peaks based on length
+peakwidths <- width(combined.peaks)
+combined.peaks <- combined.peaks[peakwidths  < 10000 & peakwidths > 20]
+combined.peaks
+
+
+
+combined.peaks <- keepStandardChromosomes(combined.peaks, pruning.mode = "coarse")
+
+
+md.E14 <- read.table(
+  file = "/Users/s204371/Desktop/single nuclei analysis/Cell_ranger_ATAC_GEX/MultiomeE14/outs/per_barcode_metrics.csv",
+  stringsAsFactors = FALSE,
+  sep = ",",
+  header = TRUE,
+  row.names = 1
+)[-1, ] # remove the first row
+
+md.E18 <- read.table(
+  file = "/Users/s204371/Desktop/single nuclei analysis/Cell_ranger_ATAC_GEX/MultiomeE18/outs/per_barcode_metrics.csv",
+  stringsAsFactors = FALSE,
+  sep = ",",
+  header = TRUE,
+  row.names = 1
+)[-1, ]
+
+md.P5 <- read.table(
+  file = "/Users/s204371/Desktop/single nuclei analysis/Cell_ranger_ATAC_GEX/MultiomeP5/outs/per_barcode_metrics.csv",
+  stringsAsFactors = FALSE,
+  sep = ",",
+  header = TRUE,
+  row.names = 1
+)[-1, ]
+
+md.Adult <- read.table(
+  file = "/Users/s204371/Desktop/single nuclei analysis/Cell_ranger_ATAC_GEX/MultiomeAdult/outs/per_barcode_metrics.csv",
+  stringsAsFactors = FALSE,
+  sep = ",",
+  header = TRUE,
+  row.names = 1
+)[-1, ]
+
+
+md.E14 <- md.E14[md.E14$atac_raw_reads > 1, ]
+md.E18 <- md.E18[md.E18$atac_raw_reads > 1, ]
+md.P5 <- md.P5[md.P5$atac_raw_reads > 1, ]
+md.Adult <- md.Adult[md.Adult$atac_raw_reads > 1, ]
+
+
+frags.E14 <- CreateFragmentObject(
+  path = "/Users/s204371/Desktop/single nuclei analysis/Cell_ranger_ATAC_GEX/MultiomeE14/outs/atac_fragments.tsv.gz",
+  cells = rownames(md.E14)
+)
+
+frags.E18 <- CreateFragmentObject(
+  path = "/Users/s204371/Desktop/single nuclei analysis/Cell_ranger_ATAC_GEX/MultiomeE18/outs/atac_fragments.tsv.gz",
+  cells = rownames(md.E18)
+)
+
+frags.P5 <- CreateFragmentObject(
+  path = "/Users/s204371/Desktop/single nuclei analysis/Cell_ranger_ATAC_GEX/MultiomeP5/outs/atac_fragments.tsv.gz",
+  cells = rownames(md.P5)
+)
+
+frags.Adult <- CreateFragmentObject(
+  path = "/Users/s204371/Desktop/single nuclei analysis/Cell_ranger_ATAC_GEX/MultiomeAdult/outs/atac_fragments.tsv.gz",
+  cells = rownames(md.Adult)
+)
+
+
+
+
+counts <- Read10X_h5("/Users/s204371/Desktop/single nuclei analysis/Cell_ranger_ATAC_GEX/MultiomeE14/outs/filtered_feature_bc_matrix.h5")
+
+E14_RNA <- CreateSeuratObject(
+  counts = counts$`Gene Expression`,
+  assay = "RNA"
+)
+
+counts <- Read10X_h5("/Users/s204371/Desktop/single nuclei analysis/Cell_ranger_ATAC_GEX/MultiomeE18/outs/filtered_feature_bc_matrix.h5")
+
+E18_RNA <- CreateSeuratObject(
+  counts = counts$`Gene Expression`,
+  assay = "RNA"
+)
+
+counts <- Read10X_h5("/Users/s204371/Desktop/single nuclei analysis/Cell_ranger_ATAC_GEX/MultiomeP5/outs/filtered_feature_bc_matrix.h5")
+
+P5_RNA <- CreateSeuratObject(
+  counts = counts$`Gene Expression`,
+  assay = "RNA"
+)
+
+counts <- Read10X_h5("/Users/s204371/Desktop/single nuclei analysis/Cell_ranger_ATAC_GEX/MultiomeAdult/outs/filtered_feature_bc_matrix.h5")
+
+Adult_RNA <- CreateSeuratObject(
+  counts = counts$`Gene Expression`,
+  assay = "RNA"
+)
+
+E14.counts <- FeatureMatrix(
+  fragments = frags.E14,
+  features = combined.peaks,
+  cells = WhichCells(E14_RNA)
+)
+
+E18.counts <- FeatureMatrix(
+  fragments = frags.E18,
+  features = combined.peaks,
+  cells = WhichCells(E18_RNA)
+)
+
+P5.counts <- FeatureMatrix(
+  fragments = frags.P5,
+  features = combined.peaks,
+  cells = WhichCells(P5_RNA)
+)
+
+Adult.counts <- FeatureMatrix(
+  fragments = frags.Adult,
+  features = combined.peaks,
+  cells = WhichCells(Adult_RNA)
+)
+
+
+E14_assay <- CreateChromatinAssay(E14.counts, fragments = frags.E14)
+E14[["ATAC"]] <- E14_assay
+
+E18_assay <- CreateChromatinAssay(E18.counts, fragments = frags.E18)
+E18[["ATAC"]] <- E18_assay
+
+P5_assay <- CreateChromatinAssay(P5.counts, fragments = frags.P5)
+P5[["ATAC"]] <- P5_assay
+
+Adult_assay <- CreateChromatinAssay(Adult.counts, fragments = frags.Adult)
+Adult[["ATAC"]] <- Adult_assay
+
+
+
+DefaultAssay(E14) <- 'ATAC'
+
+DefaultAssay(E18) <- 'ATAC'
+
+DefaultAssay(P5) <- 'ATAC'
+
+DefaultAssay(Adult) <- 'ATAC'
+
+
+
+
+E14 <- FindTopFeatures(E14, min.cutoff = 10)
+E14 <- RunTFIDF(E14)
+E14 <- RunSVD(E14)
+
+
+E18 <- FindTopFeatures(E18, min.cutoff = 10)
+E18 <- RunTFIDF(E18)
+E18 <- RunSVD(E18)
+
+P5 <- FindTopFeatures(P5, min.cutoff = 10)
+P5 <- RunTFIDF(P5)
+P5 <- RunSVD(P5)
+
+Adult <- FindTopFeatures(Adult, min.cutoff = 10)
+Adult <- RunTFIDF(Adult)
+Adult <- RunSVD(Adult)
+
+
+
+
+DefaultAssay(E14) <- 'RNA'
+
+DefaultAssay(E18) <- 'RNA'
+
+DefaultAssay(P5) <- 'RNA'
+
+DefaultAssay(Adult) <- 'RNA'
+
+
+
+E14$orig.ident <- 'E14'
+E18$orig.ident <- 'E18'
+P5$orig.ident <- 'P5'
+Adult$orig.ident <- 'Adult'
+
+
+mergeData <- merge(E14, y=c(E18, P5, Adult), add.cell.ids = c("E14", "E18", "P5", "Adult"), project = "Full Merge Project")
+
+mergeData[["percent.mt"]] <- PercentageFeatureSet(mergeData, pattern = "^mt-")
+
+mergeData <- subset(
+  x = mergeData,
+  subset = nCount_ATAC < 7e4 &
+    nCount_ATAC > 400 &
+    nCount_RNA < 25000 &
+    nCount_RNA > 400 &
+    percent.mt < 20
+)
+
+DefaultAssay(mergeData) <- 'RNA'
+
+so_list_normalized<- SplitObject(object = mergeData, split.by = "orig.ident")
+
+for (i in 1:length(x = so_list_normalized)) {
+  so_list_normalized[[i]] <- NormalizeData(object = so_list_normalized[[i]], verbose = FALSE)
+  so_list_normalized[[i]] <- FindVariableFeatures(object = so_list_normalized[[i]], selection.method = "vst", nfeatures = 2000, verbose = FALSE)
+  so_list_normalized[[i]] <- PercentageFeatureSet(object = so_list_normalized[[i]], pattern = "^mt-", col.name = "percent.mt")
+  so_list_normalized[[i]] <- SCTransform(object = so_list_normalized[[i]], method = "glmGamPoi", vars.to.regress = "percent.mt", verbose = FALSE)
+  
+}
+
+#Set default assay to SCT for all objects in list 
+for (i in seq_len(length(so_list_normalized))) {
+  DefaultAssay(so_list_normalized[[i]]) <- "SCT"
+}
+
+#integrate RNA using rpca
+features <- SelectIntegrationFeatures(so_list_normalized, nfeatures = 3000)
+so_list_normalized <- PrepSCTIntegration(
+  so_list_normalized,
+  anchor.features = features
+)
+so_list_normalized <- lapply(
+  X = so_list_normalized,
+  FUN = RunPCA,
+  features = features,
+  verbose = FALSE
+)
+integration_anchors <- FindIntegrationAnchors(
+  object.list = so_list_normalized,
+  normalization.method = "SCT",
+  anchor.features = features,
+  dims = 1:30,
+  reduction = "rpca",
+  k.anchor = 20,
+)
+so <- IntegrateData(
+  anchorset = integration_anchors,
+  normalization.method = "SCT",
+  new.assay.name = "integratedRNA",
+  dims = 1:30
+)
+
+#run LSI on new seurat object with integrated RNA assay
+DefaultAssay(so) <- "ATAC"
+so <- RunTFIDF(so)
+so <- FindTopFeatures(so, min.cutoff = "q25")
+so <- RunSVD(so)
+
+#integrate embeddings and output new object to prevent overwriting integrated RNA
+#I can't quite remember why I did this the first time, but it was the work around that I needed
+so_atac <- IntegrateEmbeddings(
+  anchorset = integration_anchors,
+  new.reduction.name = "integratedLSI",
+  reductions = so@reductions$lsi
+)
+
+#copy integrated LSI from duplicate seurat object to original object
+so@reductions$integratedLSI <- so_atac@reductions$integratedLSI
+
+so <- FindMultiModalNeighbors(so, reduction.list = list("lsi", "integratedLSI"), dims.list = list(1:30, 2:30))
+
+so <- RunUMAP(so, nn.name = "weighted.nn", reduction.name = "wnn.umap", reduction.key = "wnnUMAP_")
+so <- FindClusters(so, graph.name = "wsnn", algorithm = 3, verbose = FALSE)
+DimPlot(so, reduction = "wnn.umap", label = TRUE)
+
+
+DefaultAssay(so) <- "integratedRNA"
+
+
+# Run the standard workflow for visualization and clustering
+so <- ScaleData(so, verbose = FALSE)
+so <- RunPCA(so, npcs = 30, verbose = FALSE)
+so <- RunUMAP(so, reduction = "pca", reduction.name = "umap.RNA",dims = 1:30)
+
+DimPlot(so, reduction = "umap.RNA")
+
+# ATAC analysis
+DefaultAssay(so) <- "ATAC"
+so <- RunTFIDF(so)
+so <- FindTopFeatures(so, min.cutoff = 'q0')
+so <- RunSVD(so)
+so <- RunUMAP(so, reduction = "integratedLSI", reduction.name = "umap.atac", dims = 2:30,  reduction.key = 'ATACUMAP_')
+
+DimPlot(so, reduction = "umap.atac")
+
+
+
+
+new.cluster.ids <- c("Myonuclei", 
+                     "Myonuclei",
+                     "FAPs",
+                     "FAPs",
+                     "FAPs",
+                     "Myonuclei",
+                     "Myonuclei", 
+                     "Myonuclei",
+                     "Myonuclei",
+                     "Myonuclei",
+                     "MuSC",
+                     "Myonuclei",
+                     "Myoblast",
+                     "Tenocyte",
+                     "FAPs", 
+                     "Myonuclei", "Tenocyte", "Tenocyte", "Enndothelial", "FAPs", "Tenocyte", "FAPs", "Macrophage", "Myonuclei", "Smooth muscle", "Adipocyte")
+names(new.cluster.ids) <- levels(so)
+so <- RenameIdents(so, new.cluster.ids)
+
+
+
+DimPlot(so, reduction = "wnn.umap")
+
+DimPlot(so, reduction = "umap.RNA")
+
+DimPlot(so, reduction = "umap.atac")
+
+
+DimPlot(so, reduction = "wnn.umap", group.by = "orig.ident")
+
+DimPlot(so, reduction = "umap.RNA", group.by = "orig.ident")
+
+DimPlot(so, reduction = "umap.atac", group.by = "orig.ident")
+
+
+saveRDS(so, file = "/Users/s204371/Desktop/Analyse_WNN/so.rds")
+
+

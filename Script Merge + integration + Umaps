@@ -395,6 +395,7 @@ DimPlot(so, reduction = "umap.atac")
 
 DimPlot(so, reduction = "wnn.umap", group.by = "orig.ident")
 
+
 DimPlot(so, reduction = "umap.RNA", group.by = "orig.ident")
 
 DimPlot(so, reduction = "umap.atac", group.by = "orig.ident")
@@ -402,4 +403,233 @@ DimPlot(so, reduction = "umap.atac", group.by = "orig.ident")
 
 saveRDS(so, file = "/Users/s204371/Desktop/Analyse_WNN/so.rds")
 
+
+
+# Run ChromVar
+
+DefaultAssay(so) <- "ATAC"
+
+
+annotation <- GetGRangesFromEnsDb(ensdb = EnsDb.Mmusculus.v79)
+seqlevelsStyle(annotation) <- 'UCSC'
+genome(annotation) <- "mm10"
+
+Annotation(so) <- annotation
+
+
+gene.activities <- GeneActivity(so)
+
+
+
+pwm_set <- getMatrixSet(x = JASPAR2020, opts = list(species = 9606, all_versions = FALSE))
+motif.matrix <- CreateMotifMatrix(features = granges(so), pwm = pwm_set, genome = 'BSgenome.Mmusculus.UCSC.mm10', use.counts = FALSE)
+motif.object <- CreateMotifObject(data = motif.matrix, pwm = pwm_set)
+so <- SetAssayData(so, assay = 'ATAC', slot = 'motifs', new.data = motif.object)
+
+
+pfm <- getMatrixSet(
+  x = JASPAR2020,
+  opts = list(species = 9606, all_versions = FALSE)
+)
+
+# add motif information
+so <- AddMotifs(
+  object = so,
+  genome = BSgenome.Mmusculus.UCSC.mm10,
+  pfm = pfm
+)
+
+
+
+
+so <- RunChromVAR(
+  object = so,
+  genome = BSgenome.Mmusculus.UCSC.mm10
+)
+
+
+
+
+DefaultAssay(so) <- 'chromvar'
+
+
+motif.name <- ConvertMotifID(so, name = 'MAF')
+gene_plot <- FeaturePlot(so, features = "rna_Maf", reduction = 'wnn.umap')
+motif_plot <- FeaturePlot(so, features = motif.name, min.cutoff = 0, cols = c("lightgrey", "darkred"), reduction = 'wnn.umap')
+gene_plot | motif_plot
+
+
+
+
+# Heatmap differential expressed genes Myonuclei
+
+
+
+Myonuclei <- subset(so, idents = c("Myonuclei"))
+
+
+
+Myonuclei <- FindMultiModalNeighbors(Myonuclei, reduction.list = list("lsi", "integratedLSI"), dims.list = list(1:30, 2:30))
+
+Myonuclei <- RunUMAP(Myonuclei, nn.name = "weighted.nn", reduction.name = "wnn.umap", reduction.key = "wnnUMAP_")
+Myonuclei <- FindClusters(Myonuclei, graph.name = "wsnn", algorithm = 3, verbose = FALSE)
+DimPlot(Myonuclei, reduction = "wnn.umap", label = TRUE)
+
+
+
+
+
+DefaultAssay(Myonuclei) <- "integratedRNA"
+
+
+Myonuclei <- ScaleData(Myonuclei, verbose = FALSE)
+Myonuclei <- RunPCA(Myonuclei, npcs = 30, verbose = FALSE)
+Myonuclei <- RunUMAP(Myonuclei, reduction = "pca", reduction.name = "umap.RNA",dims = 1:30)
+
+
+
+
+
+
+DefaultAssay(Myonuclei) <- "ATAC"
+Myonuclei <- RunTFIDF(Myonuclei)
+Myonuclei <- FindTopFeatures(Myonuclei, min.cutoff = 'q0')
+Myonuclei <- RunSVD(Myonuclei)
+Myonuclei <- RunUMAP(Myonuclei, reduction = "integratedLSI", reduction.name = "umap.atac", dims = 2:30,  reduction.key = 'ATACUMAP_')
+
+DimPlot(Myonuclei, reduction = "umap.atac")
+
+
+
+new.cluster.ids <- c("Myonuclei", 
+                     "Myonuclei",
+                     "Myonuclei",
+                     "Myonuclei",
+                     "Myonuclei",
+                     "Myonuclei",
+                     "Myonuclei", 
+                     "Myonuclei",
+                     "Myonuclei",
+                     "Myonuclei",
+                     "Myonuclei",
+                     "Myonuclei")
+names(new.cluster.ids) <- levels(Myonuclei)
+Myonuclei <- RenameIdents(Myonuclei, new.cluster.ids)
+
+
+
+DefaultAssay(Myonuclei) <- "RNA"
+
+Myonuclei$celltype.orig.ident <- paste(Idents(Myonuclei), Myonuclei$orig.ident, sep = "_")
+Myonuclei$celltype <- Idents(Myonuclei)
+Idents(Myonuclei) <- "celltype.orig.ident"
+
+
+
+
+all.genes <- rownames(Myonuclei)
+Myonuclei<- ScaleData(Myonuclei, features = all.genes)
+
+
+b.interferon.response <- FindMarkers(Myonuclei, ident.1 = "Myonuclei_E14", ident.2 = c("Myonuclei_E18", "Myonuclei_P5", "Myonuclei_Adult"), min.pct = 0.25, only.pos = TRUE)
+
+b.interferon.response1 <- FindMarkers(Myonuclei, ident.1 = "Myonuclei_E18", ident.2 = c("Myonuclei_E14", "Myonuclei_P5", "Myonuclei_Adult"), min.pct = 0.25, only.pos = TRUE)
+
+b.interferon.response2 <- FindMarkers(Myonuclei, ident.1 = "Myonuclei_P5", ident.2 = c("Myonuclei_E14", "Myonuclei_E18", "Myonuclei_Adult"), min.pct = 0.25, only.pos = TRUE)
+
+b.interferon.response3 <- FindMarkers(Myonuclei, ident.1 = "Myonuclei_Adult", ident.2 = c("Myonuclei_E14", "Myonuclei_E18", "Myonuclei_P5"), min.pct = 0.25, only.pos = TRUE)
+
+
+
+top30 <- head(b.interferon.response, n=15)
+top30.1 <- head(b.interferon.response1, n=15)
+top30.2 <- head(b.interferon.response2, n=15)
+top30.3 <- head(b.interferon.response3, n=15)
+
+DoHeatmap(Myonuclei, features = c(rownames(top30),rownames(top30.1),rownames(top30.2), rownames(top30.3)))
+
+
+DoHeatmap(subset(Myonuclei, downsample = 200), features = c(rownames(top30),rownames(top30.1),rownames(top30.2),rownames(top30.3)), size = 3)+ scale_fill_gradientn(colors = c("blue", "white", "red"))
+
+
+
+
+# Motif ATACseq
+
+
+new.cluster.ids <- c("P5", 
+                     "Adult",
+                     "Adult",
+                     "Adult",
+                     "E18",
+                     "Adult",
+                     "Adult", 
+                     "E14",
+                     "E14",
+                     "E18",
+                     "E14",
+                     "P5")
+names(new.cluster.ids) <- levels(Myonuclei)
+Myonuclei <- RenameIdents(Myonuclei, new.cluster.ids)
+
+DefaultAssay(Myonuclei) <- "chromvar"
+
+
+all.genes <- rownames(Myonuclei)
+Myonuclei <- ScaleData(Myonuclei, features = all.genes)
+
+
+my_levels <- c("E14", "E18", "P5", "Adult")
+
+levels(Myonuclei) <- my_levels
+
+
+Markers <- c("MA0867.2", "MA0163.1", "MA0868.2", "MA0759.1", "MA0765.2", "MA0809.2", "MA0599.1", "MA0500.2", "MA0808.1", "MA0665.1", "MA0716.1", "MA0670.1", "MA1643.1", "MA0161.2", "MA0671.1", "MA1520.1", "MA1112.2", "MA1574.1", "MA0112.3", "MA0843.1")
+
+DoHeatmap(subset(Myonuclei, downsample = 100), features = Markers, size = 3) + scale_fill_gradientn(colors = c("blue", "white", "red")) 
+
+
+
+
+# RNA+ATAC analysis
+
+
+markers_rna <- presto:::wilcoxauc.Seurat(X = Myonuclei, group_by = 'seurat_clusters', assay = 'data', seurat_assay = 'SCT')
+
+# Convert data with toupper function
+
+markers_rna <- data.frame(lapply(markers_rna, function(variables) {
+  if (is.character(variables)) {
+    return(toupper(variables))
+  } else {
+    return(variables)
+  }
+}),
+stringsAsFactors = FALSE)
+
+
+markers_motifs <- presto:::wilcoxauc.Seurat(X = Myonuclei, group_by = 'seurat_clusters', assay = 'data', seurat_assay = 'chromvar')
+motif.names <- markers_motifs$feature
+colnames(markers_rna) <- paste0("RNA.", colnames(markers_rna))
+colnames(markers_motifs) <- paste0("motif.", colnames(markers_motifs))
+markers_rna$gene <- markers_rna$RNA.feature
+markers_motifs$gene <- ConvertMotifID(Myonuclei, id = motif.names)
+
+
+
+topTFs <- function(seurat_clusters, padj.cutoff = 1e-2) {
+  ctmarkers_rna <- dplyr::filter(
+    markers_rna, RNA.group == seurat_clusters, RNA.padj < padj.cutoff, RNA.logFC > 0) %>% 
+    arrange(-RNA.auc)
+  ctmarkers_motif <- dplyr::filter(
+    markers_motifs, motif.group == seurat_clusters, motif.padj < padj.cutoff, motif.logFC > 0) %>% 
+    arrange(-motif.auc)
+  top_tfs <- inner_join(
+    x = ctmarkers_rna[, c(2, 11, 6, 7)], 
+    y = ctmarkers_motif[, c(2, 1, 11, 6, 7)], by = "gene"
+  )
+  top_tfs$avg_auc <- (top_tfs$RNA.auc + top_tfs$motif.auc) / 2
+  top_tfs <- arrange(top_tfs, -avg_auc)
+  return(top_tfs)
+}
 
